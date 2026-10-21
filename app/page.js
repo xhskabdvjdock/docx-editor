@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { APP, CORE, TYPES, buildDocx, loadDocx } from "../lib/docx";
+import { APP, CORE, TYPES, batText, buildDocx, loadDocx, localInput, psLines, utcToLocalInput } from "../lib/docx";
 
 function Field({ k, def, value, onChange }) {
   const [, tag, label, kind] = def;
@@ -23,12 +23,14 @@ export default function Page() {
   const [custom, setCustom] = useState([]);
   const [msg, setMsg] = useState({ t: "", c: "" });
   const [over, setOver] = useState(false);
+  const [sys, setSys] = useState({ created: "", modified: "", accessed: "" });
   const input = useRef(null);
 
   async function open(f) {
     if (!f) return;
     try {
       const d = await loadDocx(f);
+      const l = localInput(new Date(f.lastModified)); setSys({ created: l, modified: l, accessed: l });
       setDoc(d); setFile(f); setValues(d.values); setCustom(d.custom); setMsg({ t: "", c: "" });
     } catch {
       setMsg({ t: "تعذّرت قراءة الملف. تأكد أنه ملف Word بصيغة docx صحيحة.", c: "var(--er)" });
@@ -40,7 +42,7 @@ export default function Page() {
       const blob = await buildDocx({ ...doc, values, custom });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = file.name.replace(/\.[^.]+$/, "") + "-edited.docx";
+      a.download = outName;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       setMsg({ t: "تم تصدير الملف ✓", c: "var(--ok)" });
@@ -49,6 +51,18 @@ export default function Page() {
     }
   }
 
+  const outName = file ? file.name.replace(/\.[^.]+$/, "") + "-edited.docx" : "";
+  const sameAsInternal = () => {
+    const c = utcToLocalInput(values.core_created), m = utcToLocalInput(values.core_modified);
+    setSys({ created: c, modified: m || c, accessed: m || c });
+  };
+  const saveBat = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([batText(outName, sys)], { type: "text/plain" }));
+    a.download = "set-file-dates.bat";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
   const setVal = (id, v) => setValues((s) => ({ ...s, [id]: v }));
   const setC = (n, patch) => setCustom((s) => s.map((c, i) => (i === n ? { ...c, ...patch } : c)));
 
@@ -86,12 +100,27 @@ export default function Page() {
               </div>
             ))}
             <button className="g" onClick={() => setCustom((s) => [...s, { name: "", tag: "lpwstr", val: "" }])}>+ إضافة خاصية</button></div>
+          <div className="card"><h2>تواريخ الملف في النظام (Date created / modified / accessed)</h2>
+            <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>هذه التواريخ هي التي يعرضها Windows في Properties ← Details ← File، وهي خارج الملف نفسه. المتصفح لا يستطيع تغييرها، لذلك يولّد الموقع أمراً تشغّله على جهازك بعد التصدير. التوقيت هنا محلي (توقيت جهازك).</p>
+            <div className="grid">
+              {[["created", "Date created"], ["modified", "Date modified"], ["accessed", "Date accessed"]].map(([k, lb]) => (
+                <div key={k}><label htmlFor={"sys_" + k}>{lb}</label>
+                  <input id={"sys_" + k} type="datetime-local" step="1" className="ltr" value={sys[k]} onChange={(e) => setSys((s) => ({ ...s, [k]: e.target.value }))} /></div>
+              ))}
+            </div>
+            <div className="bar" style={{ margin: "12px 0" }}>
+              <button className="g" onClick={sameAsInternal}>نفس التواريخ الداخلية أعلاه</button>
+              <button onClick={saveBat}>تنزيل set-file-dates.bat</button>
+              <button className="g" onClick={() => navigator.clipboard.writeText(psLines(outName, sys).join("\n"))}>نسخ أوامر PowerShell</button>
+            </div>
+            <pre className="ltr" style={{ margin: 0, padding: 10, background: "var(--bg)", border: "1px solid var(--bd)", borderRadius: 8, overflowX: "auto", fontSize: 12.5 }}>{psLines(outName, sys).join("\n")}</pre>
+            <p className="hint">الخطوات: صدّر الملف ← ضع set-file-dates.bat في نفس مجلده ← انقر عليه مرتين. (أو الصق الأوامر في PowerShell داخل نفس المجلد.) إن غيّرت اسم الملف بعد التصدير فعدّل الاسم في الأمر.</p></div>
           <div className="bar">
             <button onClick={exportDoc}>تصدير الملف المعدّل</button>
             <button className="g" onClick={() => open(file)}>إعادة القيم الأصلية</button>
             <span style={{ color: msg.c || "var(--mut)" }}>{msg.t}</span>
           </div>
-          <p className="hint">ملاحظة: تاريخ الإنشاء/التعديل في نظام التشغيل (خارج الملف) لا يمكن للمتصفح تغييره، أما الموجود داخل الملف فيتم تعديله بالكامل.</p>
+          <p className="hint">ملاحظة: نسخ الملف إلى فلاش/ضغطه/رفعه قد يغيّر تواريخ النظام، فاضبطها على النسخة النهائية.</p>
         </>
       )}
     </main>
